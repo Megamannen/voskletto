@@ -1,29 +1,34 @@
+// @externs
 let objs =  []
 class Recognizer extends EventTarget {
   constructor(rec) {
     super()
     this.obj = rec
     objs.push(this)
+    this.ptr = Module._malloc(512)
+    this.arr = Module.HEAPF32.subarray(this.ptr, this.ptr+512)
   }
-  getNode(ctx) {
-    let channel = new MessageChannel()
-    this.node = new AudioWorkletNode(ctx, 'BRProcessor', { channelCount: 1, numberOfInputs: 1, numberOfOutputs: 1 })
-    node.port.postMessage({cmd : "init", ptr: this.ptr},[channel.port1])
-    channel.port1.onmessage = (ev) => {
-      this.obj.acceptWaveForm(this.ptr, 512)
-    } 
-    return this.node
+  async getNode(ctx, channelIndex = 0) {
+    if(typeof this.node === "undefined") {
+      let msgChannel = new MessageChannel()
+      ctx.AudioWorklet.addModule("src/processor.js")
+      this.node = new AudioWorkletNode(ctx, 'BRProcessor', { channelCountMode: "max", numberOfInputs: 1, numberOfOutputs: 1 })
+      this.node.port.postMessage({cmd : "init", ptr: this.ptr, channel: channelIndex}, [msgChannel.port1])
+      msgChannel.port1.onmessage = (ev) => {
+        this.obj.acceptWaveForm()
+      } 
+      return this.node
+    }
   }
-  recognize(buf) {
-    buf.copyFromChannel()
-    this.obj.acceptWaveForm(this.ptr, 512)
+  recognize(buf, channelIndex = 0) {
+    buf.copyFromChannel(this.arr, channelIndex)
+    this.obj.acceptWaveForm()
   }
   delete() {
     this.obj.delete()
     if(typeof this.node !== "undefined") {
       this.node.port.postMessage({cmd : "deinit"})
     }
-    Module.free(this.ptr)
   }
   setWords(words) {
     this.obj.setWords(words)
@@ -46,7 +51,6 @@ class Recognizer extends EventTarget {
 }
 Module.deleteAll = () => {
   objs.forEach(obj => obj.delete())
-  ctx.close()
 }
 Module.makeModel = async (url, path, id) => {
   let mdl
@@ -71,11 +75,11 @@ Module.makeSpkModel = async (url, path, id) => {
   }
   objs.push(mdl)
   return mdl
-}, ctx.AudioWorklet
-Module.makeRecognizer = async (model) => {
+}
+Module.makeRecognizer = async (model, sampleRate) => {
   let rec
   try {
-    rec = new Module.recognizer(model, ctx.sampleRate, objs.length)
+    rec = new Module.recognizer(model, sampleRate, objs.length)
   }
   catch(e) {
     rec.delete()
