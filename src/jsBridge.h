@@ -1,7 +1,8 @@
 #pragma once
 #include <thread>
-#include <atomic>
+#include <mutex>
 #include <queue>
+#include <condition_variable>
 
 #include <emscripten/wasmfs.h>
 #include <emscripten/console.h>
@@ -18,8 +19,8 @@ extern ProxyingQueue glbQ;
 void fireEv(int index, const char* content, const char* type = nullptr);
 struct reusableThrd { 
   std::queue<std::function<void()>> queue{};
-  std::atomic_flag blocker{};
-  std::atomic_flag done{};
+  bool done{};
+
   void addTask(std::function<void()>&& task);
   reusableThrd();
   ~reusableThrd();
