@@ -1,4 +1,4 @@
-#include "global.h"
+#include "jsBridge.h"
 
 pthread_t dstThrd{pthread_self()};
 bool OPFSOk{};
@@ -17,9 +17,7 @@ void fireEv(int index, const char* content, const char* type) {
 }
 reusableThrd::reusableThrd() {
   std::thread thrd{[this](){
-    while(!done.test(std::memory_order_relaxed)) {
-      blocker.wait(queue.empty() || done.test(std::memory_order_relaxed),  std::memory_order_relaxed);
-      blocker.clear(std::memory_order_relaxed);
+    while(!done) {
       while(!queue.empty()) {
         emscripten_console_log("==========Executing task===========");
         queue.front()();
@@ -31,12 +29,7 @@ reusableThrd::reusableThrd() {
 }
 void reusableThrd::addTask(std::function<void()>&& task) {
   queue.emplace(task);
-  // The following line will make -O3 magically work. Yes, I know, it is a god dang PRINT STATEMENT.
-  //emscripten_console_log("");
-  blocker.test_and_set(std::memory_order_relaxed);
-  blocker.notify_one();
 }
 reusableThrd::~reusableThrd() {
-  done.test_and_set(std::memory_order_relaxed);
-  done.notify_one();
+  done = true;
 }
