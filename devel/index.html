@@ -3,20 +3,8 @@
   <head>
     <script src="Vosklet.js"></script>
     <script>
-      async function func() {
-        let processorURL = URL.createObjectURL(new Blob(['(',
-          (() => {
-            registerProcessor('processor', class extends AudioWorkletProcessor {
-              process(inputs, outputs) {
-                for (let channel = 0; channel < outputs[0].length; ++channel) {
-                  outputs[0][channel].set(inputs[0][channel])
-                }
-                return true
-              }
-            })
-          }).toString(),
-        ')()'], { type : "text/javascript" }))
-        window.ctx = new AudioContext({sampleRate : 16000})
+      async function start() {
+        let ctx = new AudioContext({sampleRate : 16000})
         let micNode = ctx.createMediaStreamSource(await navigator.mediaDevices.getUserMedia({
           video: false,
           audio: {
@@ -26,26 +14,23 @@
             sampleRate: 16000
           },
         }))
-        await ctx.audioWorklet.addModule(processorURL)
-        window.node = new AudioWorkletNode(ctx, "processor", { channelCountMode: "explicit", numberOfInputs : 1, numberOfOutputs : 1})
-        micNode.connect(node).connect(ctx.destination)
-        ctx.resume()
-      }
-      window.onload = async () => {
-        /*window.module = await loadVosklet()
-        window.model = await module.makeModel("../usage/en-model.tgz","model","ID")
-        window.recognizer = await module.makeRecognizer(model, 16000)
-        recognizer.addEventListener("result", e => {
-          console.log("Result: ", e.detail)
+        let module = await loadVosklet()
+        let model = await module.createModel("../usage/en-model.tgz","model","ID")
+        let recognizer = await module.createRecognizer(model, 16000)
+        recognizer.addEventListener("result", ev => {
+          console.log("Result: ", ev.detail)
         })
-        recognizer.addEventListener("partialResult", e => {
-          console.log("Partial result: ", e.detail)
-        })*/
-        //let recNode = await recognizer.getNode(ctx)
-        //recNode.connect(ctx.destination)
-        //micNode.connect(recNode)
+        recognizer.addEventListener("partialResult", ev => {
+          console.log("Partial result: ", ev.detail)
+        })
+        let transferer = await module.createTransferer(ctx)
+        console.log(transferer)
+        transferer.port.onmessage = ev => {
+          recognizer.acceptWaveform(ev.data)
+        }
+        micNode.connect(transferer)
       }
     </script>
-    <button onclick="func()">Just another button</button>
+    <button onclick="start()">Start</button>
   </head>
 </html>
