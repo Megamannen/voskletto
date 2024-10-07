@@ -5,48 +5,9 @@
 
 if(ENVIRONMENT_IS_WEB) {
 
-// "var" to expose this outside the if
+// 'var' to expose this outside the if
 var objs = [];
 var events = ['status', 'partialResult', 'result'];
-let storageWorkerURL = URL.createObjectURL(new Blob(['(', (async () => {
-  let txtDecoder = new TextDecoder();
-  let txtEncoder = new TextEncoder();
-  let OPFSRoot = await navigator.storage.getDirectory();
-  onmessage = async msg => {
-    msg = msg.data;
-    let components = msg.storepath.split('/');
-    let prevDir = OPFSRoot;
-    for(let component of components) prevDir = await prevDir.getDirectoryHandle(component, { create: true });
-    let idHandle = await prevDir.getFileHandle('id', { create: true });
-    let mdlHandle = await prevDir.getFileHandle('model.tgz', { create: true });
-    let idFile = await idHandle.createSyncAccessHandle();
-    let mdlFile = await mdlHandle.createSyncAccessHandle();
-    let oldIdBuf = new ArrayBuffer(idFile.getSize());
-    idFile.read(oldIdBuf);
-    let tar, tgz;
-    if(txtDecoder.decode(oldIdBuf) == msg.id) {
-      tgz = new ArrayBuffer(mdlFile.getSize());
-      mdlFile.read(tgz);
-      tar = await new Response(new Response(tgz).body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-    }
-    else {
-      let res = await fetch(msg.url);
-      if(!res.ok) throw 'Unable to download model'
-      let teed = res.body.tee();
-      tgz = await new Response(teed[0].pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
-      mdlFile.write(tgz, { at: 0 });
-      mdlFile.truncate(tgz.byteLength);
-      let newId = txtEncoder.encode(msg.id);
-      idFile.write(newId, { at: 0 });
-      idFile.truncate(newId.length);
-      tar = await new Response(teed[1]).arrayBuffer();
-    }
-    idFile.close();
-    mdlFile.close();
-    self.postMessage(tar, [tar]);
-  }
-}).toString(), ')()'], { type: 'text/javascript' }))
-let storageWorker = new Worker(storageWorkerURL);
 let processorURL = URL.createObjectURL(new Blob(['(', (() => {
   registerProcessor('VoskletTransferer', class extends AudioWorkletProcessor {
     constructor(opts) {
@@ -88,17 +49,23 @@ class CommonModel extends EventTarget {
         else reject(ev.detail)
       }, { once: true })
     });
-    storageWorker.addEventListener('message', tar => {
-      tar = tar.data;
-      let tarStart = _malloc(tar.byteLength);
-      HEAPU8.set(new Uint8Array(tar), tarStart);
-      mdl.obj = new Module['CommonModel'](objs.length - 1, normalMdl, tarStart, tar.byteLength);
-    }, { once: true });
-    storageWorker.postMessage({
-      url: url,
-      storepath: storepath,
-      id: id
-    });
+    let cache = await caches.open('Vosklet');
+    let res = await cache.match(storepath);
+    let tar;
+    if(typeof res == 'undefined' || res.headers.get('id') != id) {
+      // Caching already handled explicitly 
+      res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw 'Unable to fetch model, status: ' + res.status;
+      await cache.put(storepath, new Response(
+        res.clone().body.pipeThrough(new CompressionStream('gzip')), 
+        { headers: { 'id': id } }
+      ));
+      
+    }
+    tar = await new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+    let tarStart = _malloc(tar.byteLength);
+    HEAPU8.set(new Uint8Array(tar), tarStart);
+    mdl.obj = new Module['CommonModel'](objs.length - 1, normalMdl, tarStart, tar.byteLength);
     return result;
   }
 }
@@ -155,8 +122,6 @@ Module = {
   'cleanUp': async () => {
     for(let obj of objs) await obj.delete();
     URL.revokeObjectURL(processorURL);
-    URL.revokeObjectURL(storageWorkerURL);
-    storageWorker.terminate();
   },
 
   'createTransferer': async (ctx, bufSize) => {
