@@ -55,7 +55,7 @@ describe.skipIf(!modelPath)('voskletto-async in Chromium', () => {
     server?.close();
   });
 
-  it('recognizes the same audio in two async modules at once and in the sync module, with events', async () => {
+  it('recognizes the same audio in two async modules at once and in the sync module, with events and cache names', async () => {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
@@ -78,6 +78,8 @@ describe.skipIf(!modelPath)('voskletto-async in Chromium', () => {
     expect(result.nbest.result).toBe(0);
     expect(result.nbest.alternatives).toBe(first.finals.length);
     expect(result.nbest.firstText).toBe(first.finals[0]);
+    const model = ['/IntegrationTest?v1'];
+    expect(result.cached).toEqual({ default: model, custom: model, asyncModelCache: model, syncModelCache: model });
     expect(result.errorAfterCleanUp).toEqual({ returned: '', error: 'Module was cleaned up', unhandled: 'Module was cleaned up' });
   }, 180_000);
 });
@@ -97,6 +99,7 @@ declare global {
       sync: Run;
       afterCleanUp: string;
       nbest: { result: number; alternatives: number; firstText: string };
+      cached: Record<'default' | 'custom' | 'asyncModelCache' | 'syncModelCache', string[]>;
       errorAfterCleanUp: { returned: string; error: string; unhandled: string };
     }>;
   }

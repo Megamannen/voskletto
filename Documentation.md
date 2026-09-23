@@ -3,7 +3,7 @@
 ## JS ```window``` object
 | Function/Object | Description |
 |-|-|
-| ```Promise<Module> loadVoskletto()``` | Load voskletto module interface |
+| ```Promise<Module> loadVoskletto(options?: { cacheName?: string })``` | Load voskletto module interface. ```cacheName``` is the Cache Storage name models are stored in (default: ```'voskletto'```). Pass ```'Vosklet'``` to reuse models cached by Vosklet |
 
 ## ```Module``` object
 | Function/Object | Description |
@@ -75,7 +75,7 @@ transferer.port.onmessage = async ev => console.log(await recognizer.acceptWavef
 
 | Function/Object | Description |
 |-|-|
-| ```Promise<AsyncModule> loadVosklettoAsync(workerUrl?: string \| URL)``` | Start a worker and load a module in it. ```voskletto-worker.js```, ```voskletto.js``` and ```voskletto.wasm``` must be served from the same directory. ```workerUrl``` defaults to ```voskletto-worker.js``` next to ```voskletto-async.js```. |
+| ```Promise<AsyncModule> loadVosklettoAsync(options?: { workerUrl?: string \| URL, cacheName?: string })``` | Start a worker and load a module in it. ```cacheName``` is as for ```loadVoskletto```. ```voskletto-worker.js```, ```voskletto.js``` and ```voskletto.wasm``` must be served from the same directory. ```workerUrl``` defaults to ```voskletto-worker.js``` next to ```voskletto-async.js```. |
 
 ```AsyncModule```, ```AsyncModel```, ```AsyncSpkModel``` and ```AsyncRecognizer``` have the same functions as ```Module```, ```Model```, ```SpkModel``` and ```Recognizer```, with these differences:
 - Every function returns a ```Promise```. ```acceptWaveform``` resolves with the result JSON string.
@@ -83,7 +83,7 @@ transferer.port.onmessage = async ev => console.log(await recognizer.acceptWavef
 - Models and recognizers can only be used with the ```AsyncModule``` that created them.
 - ```setEndpointerMode``` takes the mode name as a string, e.g. ```'ANSWER_SHORT'```, instead of an ```EpMode``` value. ```AsyncModule``` has no ```EpMode```.
 - ```cleanUp()``` terminates the worker, which frees everything created in it. Pending and later calls reject.
-- The model cache is shared with ```Module```, since both use the same origin's Cache API.
+- The model cache is shared with ```Module``` when both use the same ```cacheName```, since both use the same origin's Cache API.
 
 ---
 # HTTP Remarks

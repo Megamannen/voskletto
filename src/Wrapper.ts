@@ -1,6 +1,6 @@
 // Emscripten --pre-js: bundled to build/Wrapper.js and placed inside the generated module's scope by src/make
 
-import type { EpModeValue, Model, Module as VosklettoModule, Recognizer as VosklettoRecognizer, SpkModel } from './voskletto.js';
+import type { EpModeValue, LoadOptions, Model, Module as VosklettoModule, Recognizer as VosklettoRecognizer, SpkModel } from './voskletto.js';
 import { MODEL_CACHE, needsModelFetch } from './modelCache.js';
 import { handleOutcome, type Outcome } from './results.js';
 import { createProcessorUrl, createTransferer } from './transferer.js';
@@ -43,7 +43,10 @@ if (!ENVIRONMENT_IS_WASM_WORKER) {
 
   // 'var' to expose this outside the if, fireEv (Util.cc) dispatches on it
   var objs: EventTarget[] = [];
-  const _cache = caches.open(MODEL_CACHE);
+
+  // Module is still the options passed to loadVoskletto here
+  const cacheName = (Module as LoadOptions)['cacheName'] ?? MODEL_CACHE;
+  const _cache = caches.open(cacheName);
   const processorURL = createProcessorUrl();
 
   // Settles from fireEv: no detail on success, the error message otherwise
@@ -71,7 +74,7 @@ if (!ENVIRONMENT_IS_WASM_WORKER) {
         if (normalMdl) mdl['findWord'] = word => mdl.obj['findWord'](word);
         return mdl;
       });
-      const cache = await caches.open(MODEL_CACHE);
+      const cache = await caches.open(cacheName);
       const req = (await cache.keys(storepath, { ignoreSearch: true }))[0];
       let res: Response;
       if (needsModelFetch(req?.url, id)) {

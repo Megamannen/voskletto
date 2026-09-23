@@ -1,6 +1,6 @@
 // Async facade: runs a voskletto module in a Web Worker (voskletto-worker.js) and forwards calls to it
 
-import type { AsyncModel, AsyncModule, AsyncRecognizer, AsyncSpkModel } from './voskletto.js';
+import type { AsyncModel, AsyncModule, AsyncRecognizer, AsyncSpkModel, AsyncLoadOptions, LoadOptions } from './voskletto.js';
 import { MODEL_CACHE } from './modelCache.js';
 import { handleOutcome, type Outcome } from './results.js';
 import { createClient, isHandleRef, MODULE_HANDLE, type HandleRef, type Ready, type Response } from './rpc.js';
@@ -17,8 +17,12 @@ const waitForReady = (worker: Worker) =>
  * different modules run in parallel. `voskletto-worker.js`, `voskletto.js` and `voskletto.wasm` must be
  * served from the same directory.
  */
-export const loadVosklettoAsync = async (workerUrl: string | URL = new URL('./voskletto-worker.js', import.meta.url)): Promise<AsyncModule> => {
+export const loadVosklettoAsync = async ({
+  workerUrl = new URL('./voskletto-worker.js', import.meta.url),
+  cacheName = MODEL_CACHE,
+}: AsyncLoadOptions = {}): Promise<AsyncModule> => {
   const worker = new Worker(workerUrl);
+  worker.postMessage({ cacheName } satisfies LoadOptions);
   try {
     await waitForReady(worker);
   } catch (e) {
@@ -85,7 +89,7 @@ export const loadVosklettoAsync = async (workerUrl: string | URL = new URL('./vo
       call(MODULE_HANDLE, 'createRecognizerWithGrm', ref(mdl), sampleRate, grammar).then(adopt(recognizer)),
     setLogLevel: level => call(MODULE_HANDLE, 'setLogLevel', level),
     createTransferer: (ctx, bufferSize) => createTransferer(ctx, processorUrl, bufferSize),
-    getModelCache: () => caches.open(MODEL_CACHE),
+    getModelCache: () => caches.open(cacheName),
     cleanUp: async () => {
       client.close('Module was cleaned up');
       worker.terminate();

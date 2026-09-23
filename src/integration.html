@@ -64,13 +64,22 @@
         return { returned, error, unhandled };
       };
 
+      // Model entries as path?id
+      const cachedModels = async cache => (await cache.keys()).map(req => new URL(req.url).pathname + new URL(req.url).search);
+
       window.runIntegration = async () => {
         const audio = await readWav('/test.wav');
-        const modules = await Promise.all([loadVosklettoAsync(), loadVosklettoAsync()]);
+        const modules = await Promise.all([loadVosklettoAsync(), loadVosklettoAsync({ cacheName: 'IntegrationCache' })]);
         const runs = await Promise.all(modules.map(m => recognize(m, audio)));
-        const syncModule = await loadVoskletto();
+        const syncModule = await loadVoskletto({ cacheName: 'IntegrationCache' });
         const sync = await recognize(syncModule, audio);
         const nbest = await alternativesOnly(syncModule, audio);
+        const cached = {
+          default: await cachedModels(await caches.open('voskletto')),
+          custom: await cachedModels(await caches.open('IntegrationCache')),
+          asyncModelCache: await cachedModels(await modules[1].getModelCache()),
+          syncModelCache: await cachedModels(await syncModule.getModelCache()),
+        };
         await Promise.all(modules.map(m => m.cleanUp()));
         const afterCleanUp = await modules[0].setLogLevel(0).then(() => 'resolved', e => e.message);
         const summary = ({ text, finals, eventFinals, eventPartials }) => ({ text, finals, eventFinals, eventPartials });
@@ -80,6 +89,7 @@
           sync: summary(sync),
           afterCleanUp,
           nbest,
+          cached,
           errorAfterCleanUp: await errorAfterCleanUp(runs[0].recognizer),
         };
       };

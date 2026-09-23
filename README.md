@@ -12,7 +12,7 @@ voskletto is a fork of [Vosklet](https://github.com/msqr1/Vosklet) by Rylex Phan
 - Async API: `loadVosklettoAsync()` in `voskletto-async.js` runs a module in a Web Worker, so several recognizers can run in parallel off the main thread
 - `partialResult`/`result`/`alternatives`/`nlsml`/`error` events on both recognizer types, with typed parsed results in `detail`. `error` is cancelable: `ev.preventDefault()` makes `acceptWaveform` return `''` instead of throwing
 - JS sources are TypeScript in `src`; `voskletto.d.ts` is generated
-- Renamed to voskletto: `voskletto.js`/`.wasm`, `window.loadVoskletto()`, model cache `voskletto`. Models cached under upstream's `Vosklet` cache are downloaded again
+- Renamed to voskletto: `voskletto.js`/`.wasm`, `window.loadVoskletto()`, model cache `voskletto`. Models cached under upstream's `Vosklet` cache are downloaded again, unless you pass `{ cacheName: 'Vosklet' }` to `loadVoskletto()` or `loadVosklettoAsync()`
 
 ## Build outputs are not committed
 `voskletto.js` and `voskletto.wasm` are build artifacts. Build them with `src/make` (outputs land in the repo root). `voskletto-async.js`, `voskletto-worker.js`, `AddCOI.js`, `voskletto.d.ts` and `voskletto-async.d.ts` are built from TypeScript by `npm run build`, which `src/make` also runs. Upstream's committed `Vosklet.js` and `Vosklet.wasm` builds have been removed from this fork's entire history.
@@ -62,7 +62,7 @@ export default defineConfig({
 ```ts
 import { loadVosklettoAsync } from 'voskletto';
 
-const module = await loadVosklettoAsync(`${import.meta.env.BASE_URL}voskletto/voskletto-worker.js`);
+const module = await loadVosklettoAsync({ workerUrl: `${import.meta.env.BASE_URL}voskletto/voskletto-worker.js` });
 ```
 The default worker URL is resolved from `import.meta.url`, which points into Vite's pre-bundled deps in dev, so don't rely on it. Your production host must send the same headers (or add `AddCOI.js` to the copied files and load it with a `<script>` tag).
 

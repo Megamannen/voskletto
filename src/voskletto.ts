@@ -2,8 +2,18 @@
 
 declare global {
   interface Window {
-    loadVoskletto(): Promise<Module>;
+    loadVoskletto(options?: LoadOptions): Promise<Module>;
   }
+}
+
+export interface LoadOptions {
+  /** Cache Storage name that models are stored in (default: 'voskletto'). 'Vosklet' reuses models cached by Vosklet */
+  cacheName?: string;
+}
+
+export interface AsyncLoadOptions extends LoadOptions {
+  /** URL of voskletto-worker.js (default: voskletto-worker.js next to voskletto-async.js) */
+  workerUrl?: string | URL;
 }
 
 export type EpModeName = 'ANSWER_DEFAULT' | 'ANSWER_SHORT' | 'ANSWER_LONG' | 'ANSWER_VERY_LONG';
