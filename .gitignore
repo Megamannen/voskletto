@@ -8,3 +8,7 @@ emsdk
 test.js
 test.wasm
 src/*.o
+# Build outputs
+/Vosklet.js
+/Vosklet.wasm
+*.symbols
