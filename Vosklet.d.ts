@@ -19,13 +19,13 @@ export interface Module {
   createRecognizer(model: Model, sampleRate: number): Promise<Recognizer>;
   createRecognizerWithSpkModel(
     model: Model,
-    spkModel: SpkModel,
-    sampleRate: number
+    sampleRate: number,
+    spkModel: SpkModel
   ): Promise<Recognizer>;
   createRecognizerWithGrm(
     model: Model,
-    grammar: string,
-    sampleRate: number
+    sampleRate: number,
+    grammar: string
   ): Promise<Recognizer>;
   setLogLevel(level: number): void;
   createTransferer(
@@ -47,7 +47,13 @@ export interface SpkModel {
 }
 
 export interface Recognizer extends EventTarget {
-  acceptWaveform(audioData: Float32Array): void;
+  /**
+   * Synchronously recognizes an audio block and returns the result as a JSON string:
+   * a partial result (`{"partial":"..."}`) while speech continues, or a final result
+   * (`{"text":"...","result":[...]}`) once an endpoint (silence) is detected.
+   */
+  acceptWaveform(audioData: Float32Array): string;
+  reset(): void;
   setWords(words: boolean): void;
   setPartialWords(partialWords: boolean): void;
   setNLSML(nlsml: boolean): void;
@@ -61,6 +67,7 @@ export interface Recognizer extends EventTarget {
     tMax: number
   ): void;
 
-  delete(processCurrent?: boolean): Promise<void>;
+  /** Deletes the recognizer and frees its resources. */
+  delete(): void;
 }
 
