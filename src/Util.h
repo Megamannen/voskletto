@@ -7,6 +7,7 @@
 
 #include "emscripten/atomic.h"
 #include "emscripten/console.h"
+#include "emscripten/em_macros.h"
 
 namespace fs = std::filesystem;
 
@@ -20,6 +21,6 @@ enum UntarStatus
   FailedClose
 };
 
-extern "C" void fireEv(int idx, const char *content = nullptr);
+extern "C" void fireEv(int idx, const char *content = nullptr) EM_IMPORT(fireEv);
 
 int untar(unsigned char *tar, int tarSize, const char *storepath);

@@ -3,6 +3,12 @@
 #include "emscripten/em_js.h"
 #include <cstring>
 
+EM_JS(void, fireEv, (int idx, const char *content), {
+  objs[idx].dispatchEvent(new CustomEvent("", {
+    "detail": content == 0 ? null : UTF8ToString(content)
+  }));
+});
+
 int untar(unsigned char *tar, int tarSize, const char *storepath)
 {
   if (std::memcmp(tar + 257, "ustar", 5))

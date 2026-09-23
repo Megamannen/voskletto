@@ -47,7 +47,7 @@ if [ ! -f "$OPENFST/lib/libfst.a" ]; then
   cd /tmp/openfst &&
   autoreconf -is &&
   CXXFLAGS="$SHARED_FLAGS -O3 -fno-rtti" emconfigure ./configure --prefix="$OPENFST" --enable-static --disable-shared --enable-ngram-fsts --disable-bin &&
-  emmake make -j"$JOBS" install > /dev/null &&
+  emmake make -j"$JOBS" install > /dev/null
 fi
 if [ ! -f "$OPENBLAS/lib/libopenblas.a" ]; then
   rm -rf /tmp/openblas &&
@@ -59,7 +59,7 @@ if [ ! -f "$OPENBLAS/lib/libopenblas.a" ]; then
   openblasFlags="CC=emcc HOSTCC=clang-20 TARGET=RISCV64_GENERIC USE_THREAD=0 NO_SHARED=1 BINARY=32 BUILD_SINGLE=1 BUILD_DOUBLE=1 BUILD_BFLOAT16=0 BUILD_COMPLEX16=0 BUILD_COMPLEX=0"
   openblasCFlags="$SHARED_FLAGS -fno-exceptions -fno-rtti -Wno-implicit-function-declaration -Wno-unused-function -Wno-unused-but-set-variable"
   make $openblasFlags CFLAGS="$openblasCFlags" PREFIX="$OPENBLAS" -j"$JOBS" > /dev/null &&
-  make $openblasFlags CFLAGS="$openblasCFlags" PREFIX="$OPENBLAS" -j"$JOBS" install &&
+  make $openblasFlags CFLAGS="$openblasCFlags" PREFIX="$OPENBLAS" -j"$JOBS" install
 fi
 
 if [ ! -f "$KALDI/src/kaldi.mk" ]; then

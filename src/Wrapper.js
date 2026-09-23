@@ -73,11 +73,26 @@ if (ENVIRONMENT_IS_WEB) {
     constructor() {
       super();
       objs.push(this);
-    }
-    acceptWaveform(audioData) {
-      let start = _malloc(audioData.length * 4);
-      HEAPF32.set(audioData, start / 4);
-      return UTF8ToString(this.obj['acceptWaveform'](start, audioData.length));
+
+      // Consumer-facing methods are assigned with quoted names so the Closure
+      // Compiler preserves them. As plain (unquoted) class methods they have no
+      // internal caller and get renamed/dead-code-eliminated, which strips
+      // acceptWaveform/set*/reset from the built wrapper.
+      this['acceptWaveform'] = audioData => {
+        let start = _malloc(audioData.length * 4);
+        HEAPF32.set(audioData, start / 4);
+        return UTF8ToString(this.obj['acceptWaveform'](start, audioData.length));
+      };
+      this['setWords'] = words => this.obj['setWords'](words);
+      this['setPartialWords'] = partialWords => this.obj['setPartialWords'](partialWords);
+      this['setNLSML'] = nlsml => this.obj['setNLSML'](nlsml);
+      this['setMaxAlternatives'] = alts => this.obj['setMaxAlternatives'](alts);
+      this['setGrm'] = grm => this.obj['setGrm'](grm);
+      this['setSpkModel'] = spkModel => this.obj['setSpkModel'](spkModel.obj);
+      this['setEndpointerMode'] = mode => this.obj['setEndpointerMode'](mode);
+      this['setEndpointerDelays'] = (tStartMax, tEnd, tMax) =>
+        this.obj['setEndpointerDelays'](tStartMax, tEnd, tMax);
+      this['reset'] = () => this.obj['reset']();
     }
     delete() {
       this.obj.delete();
