@@ -65,7 +65,7 @@ if (ENVIRONMENT_IS_WEB) {
       let tar = await res.arrayBuffer();
       let tarStart = _malloc(tar.byteLength);
       HEAPU8.set(new Uint8Array(tar), tarStart);
-      mdl.obj = new Module['CommonModel'](objs.length - 1, normalMdl, tarStart, tar.byteLength);
+      mdl.obj = new Module['CommonModel'](objs.indexOf(mdl), normalMdl, tarStart, tar.byteLength);
       return result;
     }
   }
