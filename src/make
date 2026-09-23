@@ -1,96 +1,290 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
 INITIAL_MEMORY=${INITIAL_MEMORY:-315mb}
 MAX_THREADS=${MAX_THREADS:-1}
-EMSDK=${EMSDK:-../emsdk}
 JOBS=${JOBS:-$(nproc)}
 
-if [ "$EMSDK" != ../emsdk ] && [ ! -f "$EMSDK" ]; then
-  echo "Invalid emsdk path"
-  exit 1
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(realpath "$SCRIPT_DIR/..")
+DEFAULT_EMSDK="$PROJECT_ROOT/emsdk"
+EMSDK=${EMSDK:-$DEFAULT_EMSDK}
+if [[ $EMSDK != /* ]]; then
+  EMSDK=$(realpath -m "$PWD/$EMSDK")
+else
+  EMSDK=$(realpath -m "$EMSDK")
 fi
-if [ "$MAX_THREADS" -lt 1 ]; then
-  echo "MAX_THREADS must be greater than or equal to 1"
+
+SRC="$SCRIPT_DIR"
+KALDI="$PROJECT_ROOT/kaldi"
+VOSK="$PROJECT_ROOT/vosk"
+OPENFST="$PROJECT_ROOT/openfst"
+OPENBLAS="$PROJECT_ROOT/openblas"
+
+die() {
+  echo "Error: $*" >&2
   exit 1
+}
+
+if ! [[ $MAX_THREADS =~ ^[1-9][0-9]*$ ]]; then
+  die "MAX_THREADS must be a positive integer"
 fi
-if [ "$JOBS" -lt 1 ]; then
-  echo "JOBS must be greater than or equal to 1"
-  exit 1
+if ! [[ $JOBS =~ ^[1-9][0-9]*$ ]]; then
+  die "JOBS must be a positive integer"
 fi
 if ! [[ $INITIAL_MEMORY =~ ^[0-9]+([kmgt]b)?$ ]]; then
-  echo "INITIAL_MEMORY valid suffixes are kb, mb, gb, tb, none (bytes)"
-  exit 1
+  die "INITIAL_MEMORY valid suffixes are kb, mb, gb, tb, or none (bytes)"
 fi
-if [ "$EMSDK" = ../emsdk ] && [ ! -f "$EMSDK" ]; then
+
+if [[ ! -f "$EMSDK/emsdk_env.sh" ]]; then
+  if [[ $EMSDK != "$DEFAULT_EMSDK" ]]; then
+    die "EMSDK does not contain emsdk_env.sh: $EMSDK"
+  fi
+  if [[ -e $EMSDK ]]; then
+    die "The default EMSDK path exists but is incomplete: $EMSDK"
+  fi
+
   echo "Installing emsdk + Emscripten..."
-  git clone --depth=1 https://github.com/emscripten-core/emsdk.git ../emsdk &&
-  cd ../emsdk &&
-  ./emsdk install 4.0.13 &&
-  ./emsdk activate 4.0.13
-fi
-. $(realpath "$EMSDK")/emsdk_env.sh &&
-export PATH=:$PATH:$(realpath "$EMSDK")/upstream/bin &&
-
-cd .. &&
-SRC=$(realpath src)
-KALDI=$(realpath kaldi)
-VOSK=$(realpath vosk)
-OPENFST=$(realpath openfst)
-OPENBLAS=$(realpath openblas)
-
-SHARED_FLAGS="-g0 -O3 -flto -msimd128 -matomics -mreference-types -mextended-const -msign-ext -mmutable-globals"
-
-if [ ! -f "$OPENFST/lib/libfst.a" ]; then
-  rm -rf /tmp/openfst &&
-  wget https://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.8.4.tar.gz -O /tmp/openfst.tgz &&
-  mkdir /tmp/openfst &&
-  tar -xzf /tmp/openfst.tgz -C /tmp/openfst --strip-component 1 &&
-  cd /tmp/openfst &&
-  autoreconf -is &&
-  CXXFLAGS="$SHARED_FLAGS -O3 -fno-rtti" emconfigure ./configure --prefix="$OPENFST" --enable-static --disable-shared --enable-ngram-fsts --disable-bin &&
-  emmake make -j"$JOBS" install > /dev/null
-fi
-if [ ! -f "$OPENBLAS/lib/libopenblas.a" ]; then
-  rm -rf /tmp/openblas &&
-  git clone -b v0.3.30 https://github.com/OpenMathLib/OpenBLAS --depth=1 /tmp/openblas &&
-  cd /tmp/openblas &&
-  git apply "$SRC"/OpenBLAS.patch &&
-
-  # Change HOSTCC to the default C compiler on your machine
-  openblasFlags="CC=emcc HOSTCC=clang-20 TARGET=RISCV64_GENERIC USE_THREAD=0 NO_SHARED=1 BINARY=32 BUILD_SINGLE=1 BUILD_DOUBLE=1 BUILD_BFLOAT16=0 BUILD_COMPLEX16=0 BUILD_COMPLEX=0"
-  openblasCFlags="$SHARED_FLAGS -fno-exceptions -fno-rtti -Wno-implicit-function-declaration -Wno-unused-function -Wno-unused-but-set-variable"
-  make $openblasFlags CFLAGS="$openblasCFlags" PREFIX="$OPENBLAS" -j"$JOBS" > /dev/null &&
-  make $openblasFlags CFLAGS="$openblasCFlags" PREFIX="$OPENBLAS" -j"$JOBS" install
+  git clone --depth=1 https://github.com/emscripten-core/emsdk.git "$EMSDK"
+  (
+    cd "$EMSDK"
+    ./emsdk install 4.0.13
+    ./emsdk activate 4.0.13
+  )
 fi
 
-if [ ! -f "$KALDI/src/kaldi.mk" ]; then
-  git clone --depth=1 https://github.com/kaldi-asr/kaldi "$KALDI" &&
-  cd "$KALDI"/src &&
-  CXXFLAGS="$SHARED_FLAGS -UHAVE_EXECINFO_H -DEMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES=0 -fwasm-exceptions -Wno-unused-variable -Wno-unused-but-set-variable" LDFLAGS="-lembind" emconfigure ./configure --use-cuda=no --with-cudadecoder=no --static --static-math=yes --static-fst=yes --fst-version=1.8.4 --debug-level=0 --fst-root="$OPENFST" --openblas-root="$OPENBLAS" --host=WASM &&
-  emmake make -j"$JOBS" online2 rnnlm > /dev/null
+# shellcheck source=/dev/null
+source "$EMSDK/emsdk_env.sh"
+
+if [[ -z ${HOSTCC:-} ]]; then
+  if command -v clang >/dev/null 2>&1; then
+    HOSTCC=clang
+  elif command -v cc >/dev/null 2>&1; then
+    HOSTCC=cc
+  else
+    die "No native C compiler found; set HOSTCC to one"
+  fi
+fi
+command -v "$HOSTCC" >/dev/null 2>&1 || die "HOSTCC command not found: $HOSTCC"
+
+BUILD_TMP=$(mktemp -d "${TMPDIR:-/tmp}/voskletto-build.XXXXXX")
+cleanup() {
+  rm -rf -- "$BUILD_TMP"
+  rm -f -- "$SRC/Util.o" "$SRC/CommonModel.o" "$SRC/Recognizer.o" "$SRC/Bindings.o"
+}
+trap cleanup EXIT
+
+shared_flags=(-g0 -O3 -flto -msimd128 -matomics -mreference-types -mextended-const -msign-ext -mmutable-globals)
+
+if [[ ! -f "$OPENFST/lib/libfst.a" || ! -f "$OPENFST/lib/libfstngram.a" ]]; then
+  echo "Building OpenFST..."
+  openfst_build="$BUILD_TMP/openfst"
+  wget https://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.8.4.tar.gz -O "$BUILD_TMP/openfst.tgz"
+  mkdir "$openfst_build"
+  tar -xzf "$BUILD_TMP/openfst.tgz" -C "$openfst_build" --strip-component 1
+  (
+    cd "$openfst_build"
+    autoreconf -is
+    CXXFLAGS="${shared_flags[*]} -O3 -fno-rtti" emconfigure ./configure \
+      --prefix="$OPENFST" \
+      --enable-static \
+      --disable-shared \
+      --enable-ngram-fsts \
+      --disable-bin
+    emmake make -j"$JOBS" install
+  )
 fi
 
-if [ ! -f "$VOSK/src/vosk.a" ]; then
-  git clone -b v0.3.50 --depth=1 https://github.com/alphacep/vosk-api "$VOSK" &&
-  cd "$VOSK"/src &&
-  git apply "$SRC"/Vosk.patch &&
-  voskFiles="recognizer.o language_model.o model.o spk_model.o vosk_api.o" &&
+if [[ ! -f "$OPENBLAS/lib/libopenblas.a" ]]; then
+  echo "Building OpenBLAS with HOSTCC=$HOSTCC..."
+  openblas_build="$BUILD_TMP/openblas"
+  git clone -b v0.3.30 https://github.com/OpenMathLib/OpenBLAS --depth=1 "$openblas_build"
+  (
+    cd "$openblas_build"
+    git apply "$SRC/OpenBLAS.patch"
 
-  # shellcheck disable=SC2086
-  em++ $SHARED_FLAGS -DOPENFST_VER=10804 -fwasm-exceptions -Wno-deprecated -I. -I"$KALDI"/src -I"$OPENFST"/include ${voskFiles//.o/.cc} -c &&
-  emar -rcs vosk.a $voskFiles &&
-  rm -f $voskFiles
+    openblas_flags=(
+      CC=emcc
+      "HOSTCC=$HOSTCC"
+      TARGET=RISCV64_GENERIC
+      USE_THREAD=0
+      NO_SHARED=1
+      BINARY=32
+      BUILD_SINGLE=1
+      BUILD_DOUBLE=1
+      BUILD_BFLOAT16=0
+      BUILD_COMPLEX16=0
+      BUILD_COMPLEX=0
+    )
+    openblas_cflags="${shared_flags[*]} -fno-exceptions -fno-rtti -Wno-implicit-function-declaration -Wno-unused-function -Wno-unused-but-set-variable"
+    make "${openblas_flags[@]}" CFLAGS="$openblas_cflags" PREFIX="$OPENBLAS" -j"$JOBS"
+    make "${openblas_flags[@]}" CFLAGS="$openblas_cflags" PREFIX="$OPENBLAS" -j"$JOBS" install
+  )
 fi
 
-cd "$SRC" &&
-voskletFiles="Util.o CommonModel.o Recognizer.o Bindings.o"
-voskletFlags="$SHARED_FLAGS -fno-rtti -sSTRICT -sWASM_WORKERS"
-voskletLDFlags="-sWASMFS -sMODULARIZE -sTEXTDECODER=2 -sEVAL_CTORS=2 -sALLOW_UNIMPLEMENTED_SYSCALLS -sINITIAL_MEMORY=$INITIAL_MEMORY -sALLOW_MEMORY_GROWTH -sPOLYFILL=0 -sEXIT_RUNTIME=0 -sINVOKE_RUN=0 -sSUPPORT_LONGJMP=0 -sINCOMING_MODULE_JS_API=wasmMemory,instantiateWasm,wasm -sEXPORT_NAME=loadVosklet -sMALLOC=emmalloc -sENVIRONMENT=web,worker -L$KALDI/src -l:online2/kaldi-online2.a -l:decoder/kaldi-decoder.a -l:ivector/kaldi-ivector.a -l:gmm/kaldi-gmm.a -l:tree/kaldi-tree.a -l:feat/kaldi-feat.a -l:cudamatrix/kaldi-cudamatrix.a -l:lat/kaldi-lat.a -l:lm/kaldi-lm.a -l:rnnlm/kaldi-rnnlm.a -l:hmm/kaldi-hmm.a -l:nnet3/kaldi-nnet3.a -l:transform/kaldi-transform.a -l:matrix/kaldi-matrix.a -l:fstext/kaldi-fstext.a -l:util/kaldi-util.a -l:base/kaldi-base.a -L$OPENFST/lib -l:libfst.a -l:libfstngram.a -L$OPENBLAS -l:lib/libopenblas.a -L$VOSK/src -l:vosk.a -lembind --no-entry --closure 1 --pre-js Wrapper.js"
+if [[ ! -d "$KALDI/.git" ]]; then
+  [[ ! -e $KALDI ]] || die "Kaldi path exists but is not a Git checkout: $KALDI"
+  echo "Cloning Kaldi..."
+  git clone --depth=1 https://github.com/kaldi-asr/kaldi "$KALDI"
+fi
 
-# shellcheck disable=SC2086
-em++ ${voskletFiles//.o/.cc} $voskletFlags -DEMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES=0 -DMAX_WORKERS="$MAX_THREADS" -fno-exceptions -std=c++23 -c -I. -I"$VOSK"/src &&
-em++ $voskletFiles $voskletFlags $voskletLDFlags -o ../Vosklet.js
+if [[ ! -f "$KALDI/src/online2/kaldi-online2.a" || ! -f "$KALDI/src/rnnlm/kaldi-rnnlm.a" ]]; then
+  echo "Building Kaldi..."
+  (
+    cd "$KALDI/src"
+    if [[ ! -f kaldi.mk ]]; then
+      CXXFLAGS="${shared_flags[*]} -UHAVE_EXECINFO_H -DEMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES=0 -fwasm-exceptions -Wno-unused-variable -Wno-unused-but-set-variable" \
+        LDFLAGS="-lembind" \
+        emconfigure ./configure \
+          --use-cuda=no \
+          --with-cudadecoder=no \
+          --static \
+          --static-math=yes \
+          --static-fst=yes \
+          --fst-version=1.8.4 \
+          --debug-level=0 \
+          --fst-root="$OPENFST" \
+          --openblas-root="$OPENBLAS" \
+          --host=WASM
+    fi
+    emmake make -j"$JOBS" online2 rnnlm
+  )
+fi
 
-rm -f $voskletFiles
-rm -rf /tmp/openblas
-rm -rf /tmp/openfst
-cd ..
+if [[ ! -d "$VOSK/.git" ]]; then
+  [[ ! -e $VOSK ]] || die "Vosk path exists but is not a Git checkout: $VOSK"
+  echo "Cloning Vosk..."
+  git clone -b v0.3.50 --depth=1 https://github.com/alphacep/vosk-api "$VOSK"
+fi
+
+if [[ ! -f "$VOSK/src/vosk.a" ]]; then
+  echo "Building Vosk..."
+  (
+    cd "$VOSK"
+    if git apply --check "$SRC/Vosk.patch"; then
+      git apply "$SRC/Vosk.patch"
+    elif ! git apply --reverse --check "$SRC/Vosk.patch"; then
+      die "Vosk.patch cannot be applied cleanly"
+    fi
+
+    cd src
+    vosk_objects=(recognizer.o language_model.o model.o spk_model.o vosk_api.o)
+    vosk_sources=(recognizer.cc language_model.cc model.cc spk_model.cc vosk_api.cc)
+    em++ "${shared_flags[@]}" \
+      -DOPENFST_VER=10804 \
+      -fwasm-exceptions \
+      -Wno-deprecated \
+      -I. \
+      -I"$KALDI/src" \
+      -I"$OPENFST/include" \
+      "${vosk_sources[@]}" \
+      -c
+    emar rcs vosk.a "${vosk_objects[@]}"
+    rm -f -- "${vosk_objects[@]}"
+  )
+fi
+
+required_libraries=(
+  "$KALDI/src/online2/kaldi-online2.a"
+  "$KALDI/src/decoder/kaldi-decoder.a"
+  "$KALDI/src/ivector/kaldi-ivector.a"
+  "$KALDI/src/gmm/kaldi-gmm.a"
+  "$KALDI/src/tree/kaldi-tree.a"
+  "$KALDI/src/feat/kaldi-feat.a"
+  "$KALDI/src/cudamatrix/kaldi-cudamatrix.a"
+  "$KALDI/src/lat/kaldi-lat.a"
+  "$KALDI/src/lm/kaldi-lm.a"
+  "$KALDI/src/rnnlm/kaldi-rnnlm.a"
+  "$KALDI/src/hmm/kaldi-hmm.a"
+  "$KALDI/src/nnet3/kaldi-nnet3.a"
+  "$KALDI/src/transform/kaldi-transform.a"
+  "$KALDI/src/matrix/kaldi-matrix.a"
+  "$KALDI/src/fstext/kaldi-fstext.a"
+  "$KALDI/src/util/kaldi-util.a"
+  "$KALDI/src/base/kaldi-base.a"
+  "$OPENFST/lib/libfst.a"
+  "$OPENFST/lib/libfstngram.a"
+  "$OPENBLAS/lib/libopenblas.a"
+  "$VOSK/src/vosk.a"
+)
+for library in "${required_libraries[@]}"; do
+  [[ -f $library ]] || die "Required library was not built: $library"
+done
+
+voskletto_files=(Util.o CommonModel.o Recognizer.o Bindings.o)
+voskletto_sources=(Util.cc CommonModel.cc Recognizer.cc Bindings.cc)
+voskletto_flags=("${shared_flags[@]}" -fno-rtti -sSTRICT -sWASM_WORKERS)
+voskletto_ld_flags=(
+  -sWASMFS
+  -sMODULARIZE
+  -sTEXTDECODER=2
+  -sEVAL_CTORS=2
+  -sALLOW_UNIMPLEMENTED_SYSCALLS
+  "-sINITIAL_MEMORY=$INITIAL_MEMORY"
+  -sALLOW_MEMORY_GROWTH
+  -sPOLYFILL=0
+  -sEXIT_RUNTIME=0
+  -sINVOKE_RUN=0
+  -sSUPPORT_LONGJMP=0
+  "-sINCOMING_MODULE_JS_API=wasmMemory,instantiateWasm,wasm"
+  -sEXPORT_NAME=loadVoskletto
+  -sMALLOC=emmalloc
+  -sENVIRONMENT=web,worker
+  "-L$KALDI/src"
+  -l:online2/kaldi-online2.a
+  -l:decoder/kaldi-decoder.a
+  -l:ivector/kaldi-ivector.a
+  -l:gmm/kaldi-gmm.a
+  -l:tree/kaldi-tree.a
+  -l:feat/kaldi-feat.a
+  -l:cudamatrix/kaldi-cudamatrix.a
+  -l:lat/kaldi-lat.a
+  -l:lm/kaldi-lm.a
+  -l:rnnlm/kaldi-rnnlm.a
+  -l:hmm/kaldi-hmm.a
+  -l:nnet3/kaldi-nnet3.a
+  -l:transform/kaldi-transform.a
+  -l:matrix/kaldi-matrix.a
+  -l:fstext/kaldi-fstext.a
+  -l:util/kaldi-util.a
+  -l:base/kaldi-base.a
+  "-L$OPENFST/lib"
+  -l:libfst.a
+  -l:libfstngram.a
+  "-L$OPENBLAS/lib"
+  -l:libopenblas.a
+  "-L$VOSK/src"
+  -l:vosk.a
+  -lembind
+  --no-entry
+  --closure
+  1
+  --pre-js
+  "$PROJECT_ROOT/build/Wrapper.js"
+)
+
+echo "Building TypeScript..."
+(
+  cd "$PROJECT_ROOT"
+  [[ -d node_modules ]] || npm ci
+  npm run build
+)
+
+echo "Building voskletto..."
+(
+  cd "$SRC"
+  em++ "${voskletto_sources[@]}" \
+    "${voskletto_flags[@]}" \
+    -DEMSCRIPTEN_HAS_UNBOUND_TYPE_NAMES=0 \
+    "-DMAX_WORKERS=$MAX_THREADS" \
+    -fno-exceptions \
+    -std=c++23 \
+    -c \
+    -I. \
+    -I"$VOSK/src"
+  em++ "${voskletto_files[@]}" "${voskletto_flags[@]}" "${voskletto_ld_flags[@]}" -o "$PROJECT_ROOT/voskletto.js"
+)
+
+[[ -s "$PROJECT_ROOT/voskletto.js" ]] || die "voskletto.js was not created"
+[[ -s "$PROJECT_ROOT/voskletto.wasm" ]] || die "voskletto.wasm was not created"
+echo "Built $PROJECT_ROOT/voskletto.js and $PROJECT_ROOT/voskletto.wasm"

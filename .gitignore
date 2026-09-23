@@ -9,6 +9,13 @@ test.js
 test.wasm
 src/*.o
 # Build outputs
-/Vosklet.js
-/Vosklet.wasm
+/voskletto.js
+/voskletto.wasm
 *.symbols
+/node_modules
+/build
+/voskletto-async.js
+/voskletto-worker.js
+/AddCOI.js
+/voskletto.d.ts
+/voskletto-async.d.ts

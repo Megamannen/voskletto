@@ -11,7 +11,7 @@ struct Recognizer
   Recognizer(int index, float sampleRate, CommonModel *model);
   Recognizer(int index, float sampleRate, CommonModel *model, CommonModel *spkModel);
   Recognizer(int index, float sampleRate, CommonModel *model, const std::string &grm, int);
-  const char *acceptWaveform(int start, int len);
+  std::string acceptWaveform(int start, int len);
   void reset();
   void setEndpointerMode(VoskEndpointerMode mode);
   void setEndpointerDelays(float tStartMax, float tEnd, float tMax);

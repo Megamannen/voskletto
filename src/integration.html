@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<!-- Page for voskletto-async.integration.test.ts -->
+<html>
+  <head>
+    <script src="/voskletto.js"></script>
+    <script type="module">
+      import { loadVosklettoAsync } from '/voskletto-async.js';
+
+      // 16-bit PCM mono WAV to floats in [-1, 1]
+      const readWav = async url => {
+        const buf = await (await fetch(url)).arrayBuffer();
+        const view = new DataView(buf);
+        let offset = 12;
+        while (String.fromCharCode(...new Uint8Array(buf, offset, 4)) !== 'data') offset += 8 + view.getUint32(offset + 4, true);
+        const pcm = new Int16Array(buf.slice(offset + 8, offset + 8 + view.getUint32(offset + 4, true)));
+        return { sampleRate: view.getUint32(24, true), samples: Float32Array.from(pcm, s => s / 32768) };
+      };
+
+      // Works for both APIs: awaiting the sync API's plain return values is a no-op
+      const recognize = async (module, audio) => {
+        const model = await module.createModel('/model.tar.gz', 'IntegrationTest', 'v1');
+        const recognizer = await module.createRecognizer(model, audio.sampleRate);
+        const finals = [];
+        const eventFinals = [];
+        let eventPartials = 0;
+        recognizer.addEventListener('result', ev => eventFinals.push(ev.detail.text));
+        recognizer.addEventListener('partialResult', () => eventPartials++);
+        let last = '';
+        for (let i = 0; i < audio.samples.length; i += 4000) {
+          const result = JSON.parse(await recognizer.acceptWaveform(audio.samples.subarray(i, i + 4000)));
+          if (result.text !== undefined) finals.push(result.text);
+          last = result.partial ?? '';
+        }
+        const text = [...finals, last].filter(Boolean).join(' ');
+        return { recognizer, text, finals, eventFinals, eventPartials };
+      };
+
+      // With alternatives enabled, final results arrive as alternatives, never as result
+      const alternativesOnly = async (module, audio) => {
+        const model = await module.createModel('/model.tar.gz', 'IntegrationTest', 'v1');
+        const recognizer = await module.createRecognizer(model, audio.sampleRate);
+        recognizer.setMaxAlternatives(2);
+        const counts = { result: 0, alternatives: 0, firstText: '' };
+        recognizer.addEventListener('result', () => counts.result++);
+        recognizer.addEventListener('alternatives', ev => {
+          counts.alternatives++;
+          counts.firstText ||= ev.detail[0].text;
+        });
+        for (let i = 0; i < audio.samples.length; i += 4000) recognizer.acceptWaveform(audio.samples.subarray(i, i + 4000));
+        return counts;
+      };
+
+      // Handled with preventDefault(), then unhandled
+      const errorAfterCleanUp = async recognizer => {
+        let error;
+        const handle = ev => {
+          error = ev.detail.message;
+          ev.preventDefault();
+        };
+        recognizer.addEventListener('error', handle);
+        const returned = await recognizer.acceptWaveform(new Float32Array(4000));
+        recognizer.removeEventListener('error', handle);
+        const unhandled = await recognizer.acceptWaveform(new Float32Array(4000)).then(() => 'resolved', e => e.message);
+        return { returned, error, unhandled };
+      };
+
+      window.runIntegration = async () => {
+        const audio = await readWav('/test.wav');
+        const modules = await Promise.all([loadVosklettoAsync(), loadVosklettoAsync()]);
+        const runs = await Promise.all(modules.map(m => recognize(m, audio)));
+        const syncModule = await loadVoskletto();
+        const sync = await recognize(syncModule, audio);
+        const nbest = await alternativesOnly(syncModule, audio);
+        await Promise.all(modules.map(m => m.cleanUp()));
+        const afterCleanUp = await modules[0].setLogLevel(0).then(() => 'resolved', e => e.message);
+        const summary = ({ text, finals, eventFinals, eventPartials }) => ({ text, finals, eventFinals, eventPartials });
+        return {
+          crossOriginIsolated,
+          async: runs.map(summary),
+          sync: summary(sync),
+          afterCleanUp,
+          nbest,
+          errorAfterCleanUp: await errorAfterCleanUp(runs[0].recognizer),
+        };
+      };
+    </script>
+  </head>
+</html>
