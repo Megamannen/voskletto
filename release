@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Builds voskletto and publishes the build outputs as an orphan commit tagged v<version>,
+# installable with npm install github:<owner>/<repo>#v<version>
+set -euo pipefail
+
+PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+cd "$PROJECT_ROOT"
+
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+[[ $# -eq 1 ]] || die "Usage: ./release <version>"
+VERSION=$1
+TAG="v$VERSION"
+[[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "Version must be semver: $VERSION"
+
+for command in git gh jq npm; do
+  command -v "$command" >/dev/null 2>&1 || die "$command not found"
+done
+
+REPO=$(git remote get-url origin | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')
+[[ $REPO =~ ^[^/]+/[^/]+$ ]] || die "origin is not a GitHub remote: $(git remote get-url origin)"
+
+[[ -z $(git status --porcelain) ]] || die "Working tree is not clean"
+
+git fetch --quiet --tags origin
+SHA=$(git rev-parse HEAD)
+[[ -n $(git branch -r --contains "$SHA" --list 'origin/*') ]] || die "HEAD $SHA is not pushed to origin"
+! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || die "Tag $TAG already exists locally"
+[[ -z $(git ls-remote --tags origin "refs/tags/$TAG") ]] || die "Tag $TAG already exists on origin"
+
+echo "Checking..."
+[[ -d node_modules ]] || npm ci
+npm run typecheck
+npm test
+
+echo "Building..."
+src/make
+
+files=(
+  voskletto.js
+  voskletto.wasm
+  voskletto-async.js
+  voskletto-worker.js
+  AddCOI.js
+  voskletto.d.ts
+  voskletto-async.d.ts
+  README.md
+  LICENSE
+  Documentation.md
+)
+for file in "${files[@]}"; do
+  [[ -s $file ]] || die "Missing build output: $file"
+done
+
+RELEASE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/voskletto-release.XXXXXX")
+trap 'rm -rf -- "$RELEASE_TMP"' EXIT
+
+jq -n --arg version "$VERSION" --arg repo "$REPO" '{
+  name: "voskletto",
+  version: $version,
+  type: "module",
+  license: "MIT",
+  repository: { type: "git", url: "git+https://github.com/\($repo).git" },
+  types: "./voskletto-async.d.ts",
+  exports: {
+    ".": { types: "./voskletto-async.d.ts", default: "./voskletto-async.js" },
+    "./voskletto.js": "./voskletto.js",
+    "./voskletto.wasm": "./voskletto.wasm",
+    "./voskletto-worker.js": "./voskletto-worker.js",
+    "./AddCOI.js": "./AddCOI.js",
+    "./voskletto.d.ts": "./voskletto.d.ts"
+  }
+}' >"$RELEASE_TMP/package.json"
+
+# Build the orphan commit in a throwaway index so the working tree and real index stay untouched
+export GIT_INDEX_FILE="$RELEASE_TMP/index"
+for file in "${files[@]}"; do
+  git update-index --add --cacheinfo "100644,$(git hash-object -w "$file"),$file"
+done
+git update-index --add --cacheinfo "100644,$(git hash-object -w "$RELEASE_TMP/package.json"),package.json"
+TREE=$(git write-tree)
+unset GIT_INDEX_FILE
+COMMIT=$(git commit-tree "$TREE" -m "$TAG" -m "Built from $SHA")
+
+# Changelog covers source commits since the previous release's source commit, or since the fork point
+PREVIOUS_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
+if [[ -n $PREVIOUS_TAG ]]; then
+  SINCE=$(git tag -l --format='%(contents)' "$PREVIOUS_TAG" | sed -n 's/^Built from \([0-9a-f]\{40\}\)$/\1/p')
+  [[ -n $SINCE ]] || die "Cannot read source commit from $PREVIOUS_TAG"
+else
+  SINCE=1.2.1
+fi
+
+git tag -a "$TAG" "$COMMIT" -m "Built from $SHA"
+git push origin "refs/tags/$TAG"
+
+notes="$RELEASE_TMP/notes.md"
+{
+  echo '```sh'
+  echo "npm install github:$REPO#$TAG"
+  echo '```'
+  echo
+  echo "Built from $SHA"
+  echo
+  echo "## Changes"
+  git log --no-merges --format='- %s (%h)' "$SINCE..$SHA"
+} >"$notes"
+
+release_flags=(--repo "$REPO" --verify-tag --title "$TAG" --notes-file "$notes")
+[[ $VERSION != *-* ]] || release_flags+=(--prerelease)
+gh release create "$TAG" "${release_flags[@]}"
+
+echo "Released $TAG ($COMMIT)"

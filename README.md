@@ -17,6 +17,57 @@ voskletto is a fork of [Vosklet](https://github.com/msqr1/Vosklet) by Rylex Phan
 ## Build outputs are not committed
 `voskletto.js` and `voskletto.wasm` are build artifacts. Build them with `src/make` (outputs land in the repo root). `voskletto-async.js`, `voskletto-worker.js`, `AddCOI.js`, `voskletto.d.ts` and `voskletto-async.d.ts` are built from TypeScript by `npm run build`, which `src/make` also runs. Upstream's committed `Vosklet.js` and `Vosklet.wasm` builds have been removed from this fork's entire history.
 
+## Install
+Releases are orphan commits containing only the build outputs, tagged `v<version>`:
+```sh
+npm install github:Megamannen/voskletto#v<version>
+```
+`import { loadVosklettoAsync } from 'voskletto'` loads the async API. `voskletto/voskletto.js`, `voskletto/voskletto.wasm`, `voskletto/voskletto-worker.js` and `voskletto/AddCOI.js` are served as assets next to each other.
+
+### Vite
+Bundlers don't follow `importScripts('voskletto.js')` in the worker or the `.wasm` fetch in `voskletto.js`, so copy the three files unchanged with [vite-plugin-static-copy](https://github.com/sapphi-red/vite-plugin-static-copy) and pass the worker URL explicitly:
+```sh
+npm install -D vite-plugin-static-copy
+```
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
+
+// Required headers, see Documentation.md#http-remarks
+const headers = {
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+};
+
+export default defineConfig({
+  plugins: [
+    viteStaticCopy({
+      targets: [
+        {
+          src: [
+            'node_modules/voskletto/voskletto.js',
+            'node_modules/voskletto/voskletto.wasm',
+            'node_modules/voskletto/voskletto-worker.js',
+          ],
+          dest: 'voskletto',
+        },
+      ],
+    }),
+  ],
+  server: { headers },
+  preview: { headers },
+});
+```
+```ts
+import { loadVosklettoAsync } from 'voskletto';
+
+const module = await loadVosklettoAsync(`${import.meta.env.BASE_URL}voskletto/voskletto-worker.js`);
+```
+The default worker URL is resolved from `import.meta.url`, which points into Vite's pre-bundled deps in dev, so don't rely on it. Your production host must send the same headers (or add `AddCOI.js` to the copied files and load it with a `<script>` tag).
+
+To release, run `./release <version>` from a clean, pushed checkout. It typechecks, tests and builds with `src/make`, then pushes the `v<version>` tag and creates a GitHub release with `gh`.
+
 ---
 
 # Overview
