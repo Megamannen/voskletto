@@ -1,0 +1,22 @@
+{
+  "name": "voskletto",
+  "version": "2.0.0",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Megamannen/voskletto.git"
+  },
+  "types": "./voskletto-async.d.ts",
+  "exports": {
+    ".": {
+      "types": "./voskletto-async.d.ts",
+      "default": "./voskletto-async.js"
+    },
+    "./voskletto.js": "./voskletto.js",
+    "./voskletto.wasm": "./voskletto.wasm",
+    "./voskletto-worker.js": "./voskletto-worker.js",
+    "./AddCOI.js": "./AddCOI.js",
+    "./voskletto.d.ts": "./voskletto.d.ts"
+  }
+}
