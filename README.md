@@ -80,15 +80,15 @@ To release, run `./release <version>` from a clean, pushed checkout. It typechec
 
 # voskletto ...
 - Is regularly maintained
-- Support multiple models
-- Include model cache path management
-- Include model cache ID management (for updates)
+- Supports multiple models
+- Includes model cache path management
+- Includes model cache ID management (for updates)
 - Wraps all Vosk's functionaly
 - Faster and lighter than vosk-browser
 
 # Basic usage (microphone recognition in English)
 - Serve the page next to the built `voskletto.js` and `voskletto.wasm`, with the headers in [Documentation.md](Documentation.md#http-remarks)
-- Result are logged to the console
+- Results are logged to the console
 ```html
 <!DOCTYPE html>
 <html>
